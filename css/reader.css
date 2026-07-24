@@ -186,21 +186,6 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-/* ── Scanned document image ── */
-.rdr-scan-image {
-  margin: 0 0 20px 0;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #fff;
-  border: 1px solid rgba(255,255,255,0.1);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-}
-
-.rdr-scan-img {
-  width: 100%;
-  display: block;
-}
-
 /* ── Mobile: bottom sheet on small screens ── */
 @media (max-width: 540px) {
   .rdr-overlay {

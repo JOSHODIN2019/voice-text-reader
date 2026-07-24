@@ -1,17 +1,17 @@
 const synth = window.speechSynthesis;
 
-let _words        = [];
-let _paras        = [];
-let _charToWord   = new Map();
-let _wordIdx      = -1;
-let _paraIdx      = 0;
-let _uttBase      = 0;
-let _status       = 'stopped';
-let _rate         = 1;
-let _activeUtt    = null;
-let _onClose      = null;
-let _ready        = false;
-let _imageDataUrl = null;
+let _words          = [];
+let _paras          = [];
+let _charToWord     = new Map();
+let _wordIdx        = -1;
+let _paraIdx        = 0;
+let _uttBase        = 0;
+let _status         = 'stopped';
+let _rate           = 1;
+let _activeUtt      = null;
+let _onClose        = null;
+let _ready          = false;
+let _fallbackTimers = [];
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 
@@ -32,10 +32,9 @@ export function init() {
   });
 }
 
-export function open(text, filename, onClose, imageDataUrl) {
-  _onClose      = onClose ?? null;
-  _imageDataUrl = imageDataUrl ?? null;
-  _status       = 'stopped';
+export function open(text, filename, onClose) {
+  _onClose = onClose ?? null;
+  _status  = 'stopped';
   _wordIdx = -1;
   _paraIdx = 0;
   _uttBase = 0;
@@ -60,7 +59,6 @@ export function open(text, filename, onClose, imageDataUrl) {
 
 export function close() {
   _cancelSynth();
-  _imageDataUrl = null;
   const overlay = _el('rdr-overlay');
   overlay.classList.remove('is-open');
   overlay.addEventListener('transitionend', () => overlay.setAttribute('hidden', ''), { once: true });
@@ -136,18 +134,6 @@ function _parseText(text) {
 function _renderText() {
   const box = _el('rdr-text');
   box.innerHTML = '';
-
-  if (_imageDataUrl) {
-    const wrap = document.createElement('div');
-    wrap.className = 'rdr-scan-image';
-    const img = document.createElement('img');
-    img.src = _imageDataUrl;
-    img.alt = 'Scanned document';
-    img.className = 'rdr-scan-img';
-    wrap.appendChild(img);
-    box.appendChild(wrap);
-  }
-
   let wi = 0;
   for (const para of _paras) {
     const p = document.createElement('p');
@@ -195,18 +181,44 @@ function _speakFrom(pi, offset) {
   utt.rate  = _rate;
   _activeUtt = utt;
 
+  let boundaryFired = false;
+
   utt.addEventListener('boundary', e => {
     if (e.name !== 'word' || _status !== 'playing' || _activeUtt !== utt) return;
+    boundaryFired = true;
     const w = _resolve(_uttBase + e.charIndex);
     if (w !== undefined && w !== _wordIdx) _highlight(w);
   });
 
+  utt.addEventListener('start', () => {
+    // iOS Safari never fires word boundary events — fall back to timer-based
+    // highlighting after 500 ms if no boundary event has arrived.
+    const checkId = setTimeout(() => {
+      if (boundaryFired || _activeUtt !== utt || _status !== 'playing') return;
+      // Estimate ~13 chars/sec at rate=1; scale by current rate.
+      const CPS = 13 * _rate;
+      for (let wi = para.fw; wi <= para.lw; wi++) {
+        const word = _words[wi];
+        if (!word) continue;
+        const charOff = word.absStart - _uttBase;
+        if (charOff < 0) continue;
+        const id = setTimeout(() => {
+          if (_activeUtt === utt && _status === 'playing') _highlight(wi);
+        }, Math.round((charOff / CPS) * 1000));
+        _fallbackTimers.push(id);
+      }
+    }, 500);
+    _fallbackTimers.push(checkId);
+  });
+
   utt.addEventListener('end', () => {
+    _clearFallbackTimers();
     if (_activeUtt !== utt || _status !== 'playing') return;
     _speakFrom(pi + 1, 0);
   });
 
   utt.addEventListener('error', e => {
+    _clearFallbackTimers();
     if (e.error === 'canceled' || e.error === 'interrupted') return;
     if (_activeUtt === utt && _status === 'playing') _speakFrom(pi + 1, 0);
   });
@@ -241,7 +253,13 @@ function _resume() {
   _speakFrom(_paraIdx >= 0 ? _paraIdx : 0, 0);
 }
 
+function _clearFallbackTimers() {
+  _fallbackTimers.forEach(clearTimeout);
+  _fallbackTimers = [];
+}
+
 function _cancelSynth() {
+  _clearFallbackTimers();
   _activeUtt = null;
   try { synth.cancel(); } catch {}
 }

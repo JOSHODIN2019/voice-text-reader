@@ -41,48 +41,24 @@ const MIN_CONFIDENCE   = 60;
 const MIN_LENGTH       = 8;
 let abortController    = null;
 
-// ── B&W display image ────────────────────────────────────────────────────────
-// Otsu binarization used only for the display image (not for OCR input).
-function _otsuThreshold(gray) {
-  const hist = new Array(256).fill(0);
-  for (const v of gray) hist[v]++;
-  const total = gray.length;
-  let sum = 0;
-  for (let i = 0; i < 256; i++) sum += i * hist[i];
-  let sumB = 0, wB = 0, maxVar = 0, t = 128;
-  for (let i = 0; i < 256; i++) {
-    wB += hist[i]; if (!wB) continue;
-    const wF = total - wB; if (!wF) break;
-    sumB += i * hist[i];
-    const mB = sumB / wB, mF = (sum - sumB) / wF;
-    const v = wB * wF * (mB - mF) ** 2;
-    if (v > maxVar) { maxVar = v; t = i; }
+// ── Cloud OCR via Google Vision ───────────────────────────────────────────────
+// Tries the /api/ocr proxy (Google Vision DOCUMENT_TEXT_DETECTION) first.
+// Returns null if the endpoint is unconfigured or the request fails so the
+// caller can fall back to in-browser Tesseract.js.
+async function cloudOcr(canvas) {
+  try {
+    const imageData = canvas.toDataURL('image/jpeg', 0.95);
+    const res = await fetch('/api/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageData }),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.text ? json : null;
+  } catch {
+    return null;
   }
-  return t;
-}
-
-function makeDisplayImage(canvas) {
-  const MAX = 900;
-  const scale = Math.min(1, MAX / Math.max(canvas.width, canvas.height));
-  const w = Math.round(canvas.width * scale);
-  const h = Math.round(canvas.height * scale);
-  const tmp = document.createElement('canvas');
-  tmp.width = w; tmp.height = h;
-  const ctx = tmp.getContext('2d');
-  ctx.drawImage(canvas, 0, 0, w, h);
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const d = imgData.data;
-  const gray = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) {
-    gray[i] = Math.round(0.299 * d[i*4] + 0.587 * d[i*4+1] + 0.114 * d[i*4+2]);
-  }
-  const t = _otsuThreshold(gray);
-  for (let i = 0; i < w * h; i++) {
-    const v = gray[i] < t ? 0 : 255;
-    d[i*4] = d[i*4+1] = d[i*4+2] = v; d[i*4+3] = 255;
-  }
-  ctx.putImageData(imgData, 0, 0);
-  return tmp.toDataURL('image/jpeg', 0.88);
 }
 
 // ── OCR text post-processing ──────────────────────────────────────────────────
@@ -200,12 +176,16 @@ async function handleIdleActivate() {
       if (machine.current !== 'scanning') return;
       triggerFlash();
 
-      // Try OCR on the processed (warp + enhanced) frame
-      let result;
-      try { result = await ocr.recognize(processedCanvas); }
-      catch { result = { text: '', confidence: 0 }; }
+      // 1. Google Vision (best accuracy — full punctuation, no missed words)
+      let result = await cloudOcr(processedCanvas);
 
-      // Fallback: if processed frame gives nothing, try a plain raw camera grab
+      // 2. Tesseract.js on warp-corrected frame (free in-browser fallback)
+      if (!result || result.text.length < MIN_LENGTH) {
+        try { result = await ocr.recognize(processedCanvas); }
+        catch { result = { text: '', confidence: 0 }; }
+      }
+
+      // 3. Tesseract.js on raw camera frame (last resort)
       if (result.text.length < MIN_LENGTH) {
         try {
           const raw = camera.grabFrame(videoEl, captureCanvas);
@@ -217,8 +197,7 @@ async function handleIdleActivate() {
       if (machine.current !== 'scanning') return;
       const cleaned = cleanOcrText(result.text);
       if (cleaned.length >= MIN_LENGTH) {
-        const bwImageUrl = makeDisplayImage(processedCanvas);
-        onScanSuccess(cleaned, bwImageUrl);
+        onScanSuccess(cleaned);
       } else {
         onScanTimeout();
       }
@@ -232,10 +211,10 @@ async function handleIdleActivate() {
   btnCapture.onclick = () => scanner.capture();
 }
 
-function onScanSuccess(text, imageDataUrl) {
+function onScanSuccess(text) {
   cleanupScanResources();
   machine.transition('idle');
-  reader.open(text, 'Scanned Document', () => { idleBtn.focus(); }, imageDataUrl);
+  reader.open(text, 'Scanned Document', () => { idleBtn.focus(); });
 }
 
 async function onScanTimeout() {
