@@ -7,13 +7,3 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_TTS_MODEL
-        sync: false
-      - key: OPENAI_TTS_VOICE
-        sync: false
-      - key: OPENAI_TTS_INSTRUCTIONS
-        sync: false
-      - key: GOOGLE_VISION_API_KEY
-        sync: false
