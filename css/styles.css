@@ -1,0 +1,452 @@
+:root {
+  --color-bg: #000000;
+  --color-x-red: #e03c3c;
+  --color-x-red-icon: #ffffff;
+  --color-mic-pill-bg: #e8a13a;
+  --color-mic-pill-icon: #ffffff;
+  --color-menu-outline: #ffffff;
+  --color-wave-blue: #4d9de0;
+  --color-wave-orange: #f2a65a;
+  --color-text-primary: #ffffff;
+  --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* Responsive spacing tokens — all layout uses these so one change ripples everywhere */
+  --safe-top:    env(safe-area-inset-top,    0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left,   0px);
+  --safe-right:  env(safe-area-inset-right,  0px);
+
+  --edge-gap:    clamp(14px, 4vw, 24px);   /* left/right margin for top buttons   */
+  --top-gap:     clamp(14px, 3vh, 24px);   /* distance from top edge to buttons   */
+  --bottom-gap:  clamp(24px, 5vh, 48px);   /* distance from bottom edge to pill   */
+  --btn-size:    clamp(44px, 10vw, 56px);  /* cancel / menu circle diameter       */
+  --pill-height: clamp(48px, 10vw, 56px);  /* upload / mic-pill height            */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-stack);
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Screens ── */
+.screen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body[data-screen="idle"] .screen--idle    { display: block; }
+body:not([data-screen="idle"]) .screen--idle { display: none; }
+.screen--active { display: block; }
+
+.tap-target {
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.screen--active {
+  pointer-events: none;
+}
+.screen--active .btn-cancel,
+.screen--active .btn-menu,
+.screen--active .mic-pill {
+  pointer-events: auto;
+}
+
+/* ── Brand logo ── */
+.brand-logo {
+  position: fixed;
+  top: max(var(--top-gap), calc(var(--safe-top) + 14px));
+  left: 50%;
+  transform: translateX(-50%);
+  height: var(--btn-size);
+  display: flex;
+  align-items: center;
+  font-family: 'Lobster', cursive;
+  font-size: clamp(20px, 5vw, 26px);
+  line-height: 1;
+  color: var(--color-text-primary);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Edge glow canvas ── */
+.edge-glow-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  filter: blur(80px);
+}
+
+/* ── Tap ripple ── */
+.tap-ripple {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.tap-ripple span {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 90px;
+  height: 90px;
+  margin: -45px;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  border-radius: 50%;
+  opacity: 0;
+  animation: tap-ripple 2.4s ease-out infinite;
+}
+.tap-ripple span:nth-child(2) { animation-delay: 0.8s; }
+.tap-ripple span:nth-child(3) { animation-delay: 1.6s; }
+
+@keyframes tap-ripple {
+  0%   { transform: scale(0.4); opacity: 0.7; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* ── Onboarding hand ── */
+.onboarding-hand {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.onboarding-hand img {
+  position: absolute;
+  margin: -37px 0 0 -11px;
+  opacity: 0;
+  animation: onboarding-hand-tap 4.5s ease-in-out infinite;
+  transition: opacity 0.3s ease;
+}
+
+@keyframes onboarding-hand-tap {
+  0%   { opacity: 0;   transform: translateY(0); }
+  13%  { opacity: 0.6; transform: translateY(0); }
+  24%  { opacity: 0.6; transform: translateY(0); }
+  33%  { opacity: 0.6; transform: translateY(10px); }
+  37%  { opacity: 0.6; transform: translateY(10px); }
+  50%  { opacity: 0;   transform: translateY(10px); }
+  100% { opacity: 0;   transform: translateY(0); }
+}
+
+body.has-tapped .onboarding-hand img {
+  animation: none;
+  opacity: 0;
+}
+
+/* ── Waveform ── */
+.waveform-canvas {
+  position: absolute;
+  top: 18%;
+  left: 0;
+  width: 100%;
+  height: clamp(100px, 20vw, 160px);
+  transition: opacity 0.3s ease;
+}
+
+/* Hide waveform lines when camera is visible */
+body[data-screen="requesting-camera"] .waveform-canvas,
+body[data-screen="scanning"] .waveform-canvas {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Top buttons: cancel (X) and menu (···) ── */
+.btn-cancel,
+.btn-menu {
+  position: absolute;
+  top: max(var(--top-gap), calc(var(--safe-top) + 14px));
+  width: var(--btn-size);
+  height: var(--btn-size);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.btn-cancel {
+  left: max(var(--edge-gap), calc(var(--safe-left) + 14px));
+  background: var(--color-x-red);
+  color: var(--color-x-red-icon);
+  border: none;
+}
+
+.btn-menu {
+  right: max(var(--edge-gap), calc(var(--safe-right) + 14px));
+  background: transparent;
+  color: var(--color-menu-outline);
+  border: 2px solid var(--color-menu-outline);
+}
+
+/* ── Menu dropdown ── */
+.menu-dropdown {
+  position: absolute;
+  top: calc(max(var(--top-gap), calc(var(--safe-top) + 14px)) + var(--btn-size) + 8px);
+  right: max(var(--edge-gap), calc(var(--safe-right) + 14px));
+  max-width: min(240px, calc(100vw - 48px));
+  background: #1c1c1f;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.menu-dropdown p {
+  margin: 0;
+  font-size: clamp(12px, 3vw, 13px);
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+/* ── Mic pill (active screen stop button) ── */
+.mic-pill {
+  position: absolute;
+  bottom: max(var(--bottom-gap), calc(var(--safe-bottom) + 20px));
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: clamp(80px, 22vw, 96px);
+  height: var(--pill-height);
+  padding: 0 clamp(16px, 5vw, 24px);
+  border-radius: calc(var(--pill-height) / 2);
+  background: var(--color-mic-pill-bg);
+  color: var(--color-mic-pill-icon);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mic-pill.is-pulsing {
+  animation: pill-pulse 1s ease-in-out infinite;
+}
+
+.mic-pill.is-static-active {
+  box-shadow: 0 0 0 6px rgba(232, 161, 58, 0.35);
+}
+
+@keyframes pill-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50%       { transform: translateX(-50%) scale(1.08); }
+}
+
+/* ── Camera ── */
+.camera-video {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.camera-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+body[data-screen="requesting-camera"] .camera-video,
+body[data-screen="scanning"] .camera-video,
+body[data-screen="requesting-camera"] .camera-scrim,
+body[data-screen="scanning"] .camera-scrim {
+  opacity: 1;
+}
+
+/* ── Document scan overlay (corner markers canvas) ── */
+.scan-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 5;
+}
+
+body[data-screen="scanning"] .scan-overlay {
+  opacity: 1;
+}
+
+/* ── Capture wrapper + shutter button ── */
+.capture-wrap[hidden] { display: none !important; }
+
+.capture-wrap {
+  position: fixed;
+  bottom: max(var(--bottom-gap), calc(var(--safe-bottom) + 20px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+
+body[data-screen="scanning"] .capture-wrap:not([hidden]) {
+  pointer-events: auto;
+}
+
+.btn-capture {
+  width: clamp(64px, 16vw, 80px);
+  height: clamp(64px, 16vw, 80px);
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  border: 3px solid #e8a13a;
+  color: #e8a13a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+.btn-capture:active { background: rgba(232,161,58,0.3); }
+
+.capture-hint {
+  font-size: clamp(11px, 3vw, 13px);
+  color: rgba(255,255,255,0.75);
+  font-family: var(--font-stack);
+  font-weight: 500;
+  white-space: nowrap;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+  pointer-events: none;
+}
+
+/* Show the wrapper when capture button has is-visible class */
+.btn-capture.is-visible ~ .capture-hint,
+.capture-wrap:has(.btn-capture.is-visible) {
+  opacity: 0.75;
+}
+
+/* Simpler: control opacity on the wrapper */
+.capture-wrap:not([hidden]) { opacity: 0.75; }
+
+/* Pulses brighter when document corners are locked */
+.btn-capture.has-doc {
+  opacity: 1;
+  animation: capture-btn-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes capture-btn-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,161,58,0.55); }
+  50%       { box-shadow: 0 0 0 14px rgba(232,161,58,0); }
+}
+
+/* ── Capture flash ── */
+.capture-flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 100;
+}
+
+.capture-flash.is-flashing {
+  animation: flash-out 0.5s ease-out forwards;
+}
+
+@keyframes flash-out {
+  0%   { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+/* ── Hidden capture canvas ── */
+.capture-canvas {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Accessibility ── */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip: rect(0, 0, 0, 0);
+}
+
+/* ── Upload button (idle screen only) ── */
+.btn-upload {
+  display: none;
+  position: fixed;
+  bottom: max(var(--bottom-gap), calc(var(--safe-bottom) + 20px));
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: clamp(110px, 30vw, 140px);
+  height: var(--pill-height);
+  padding: 0 clamp(18px, 5vw, 28px);
+  border-radius: calc(var(--pill-height) / 2);
+  background: var(--color-mic-pill-bg);
+  color: var(--color-mic-pill-icon);
+  border: none;
+  font-family: var(--font-stack);
+  font-size: clamp(13px, 3.5vw, 15px);
+  font-weight: 600;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  white-space: nowrap;
+}
+
+body[data-screen="idle"] .btn-upload {
+  display: flex;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .tap-ripple span      { animation: none; opacity: 0.35; }
+  .onboarding-hand img  { animation: none; opacity: 0.45; transform: translateY(0); }
+  .mic-pill.is-pulsing  { animation: none; box-shadow: 0 0 0 6px rgba(232,161,58,0.35); }
+}
+
+/* ── Small phones (≤ 380px) ── */
+@media (max-width: 380px) {
+  :root {
+    --edge-gap:   12px;
+    --top-gap:    12px;
+    --bottom-gap: 20px;
+    --btn-size:   44px;
+    --pill-height: 48px;
+  }
+}

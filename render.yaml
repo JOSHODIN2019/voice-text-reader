@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: voice-text-reader
+    env: static
+    buildCommand: ""
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: true
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: no-cache

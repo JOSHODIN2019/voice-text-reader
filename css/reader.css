@@ -1,0 +1,222 @@
+/* ── Reader modal ──────────────────────────────────────────────────────────── */
+
+/* Backdrop */
+/* IMPORTANT: [hidden] must be re-stated here because display:flex on this
+   element would otherwise override the browser's built-in hidden=display:none,
+   leaving an invisible full-screen layer that blocks every tap/click. */
+.rdr-overlay[hidden] { display: none !important; }
+
+.rdr-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vw, 24px) clamp(12px, 4vw, 20px);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+
+.rdr-overlay.is-open {
+  pointer-events: auto;
+}
+
+.rdr-overlay.is-open {
+  opacity: 1;
+}
+
+/* Modal card */
+.rdr-modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 820px;
+  max-height: 88vh;
+  background: #131313;
+  border-radius: clamp(12px, 3vw, 18px);
+  box-shadow: 0 32px 100px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+  overflow: hidden;
+  transform: scale(0.96) translateY(12px);
+  transition: transform 0.25s cubic-bezier(0.34, 1.26, 0.64, 1);
+}
+
+.rdr-overlay.is-open .rdr-modal {
+  transform: scale(1) translateY(0);
+}
+
+/* ── Header ── */
+.rdr-header {
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 2vw, 10px);
+  padding: clamp(12px, 3vw, 16px) clamp(12px, 3vw, 18px);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.rdr-back {
+  width:  clamp(36px, 9vw, 42px);
+  height: clamp(36px, 9vw, 42px);
+  min-width: clamp(36px, 9vw, 42px);
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.09);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.rdr-back:hover  { background: rgba(255,255,255,0.15); }
+.rdr-back:active { background: rgba(255,255,255,0.22); }
+
+.rdr-title {
+  flex: 1;
+  font-size: clamp(13px, 3.5vw, 15px);
+  font-weight: 600;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-width: 0;
+}
+
+.rdr-jump {
+  flex-shrink: 0;
+  max-width: clamp(90px, 28vw, 140px);
+  background: rgba(255,255,255,0.07);
+  color: #f0f0f0;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: clamp(5px, 1.5vw, 6px) clamp(6px, 2vw, 8px);
+  font-size: clamp(11px, 3vw, 13px);
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Scrollable text ── */
+.rdr-text {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: clamp(16px, 4vw, 28px) clamp(16px, 5vw, 28px) 12px;
+}
+
+.rdr-para {
+  margin: 0 0 1.4em;
+  font-size: clamp(15px, 4vw, 18px);
+  line-height: 1.9;
+  color: #d8d8d8;
+  word-break: break-word;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.rdr-word {
+  display: inline;
+  padding: 1px 0;
+  border-radius: 3px;
+  transition: background 0.07s ease, color 0.07s ease;
+}
+
+.rdr-word.active {
+  background: #e8a13a;
+  color: #000;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px rgba(232,161,58,0.28);
+}
+
+/* ── Controls ── */
+.rdr-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(12px, 4vw, 20px);
+  padding: clamp(10px, 3vw, 14px) clamp(12px, 4vw, 24px);
+  padding-bottom: max(clamp(10px, 3vw, 14px), env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(255,255,255,0.07);
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.rdr-ctl {
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.rdr-ctl:active { opacity: 0.7; transform: scale(0.93); }
+
+.rdr-ctl-play {
+  width:  clamp(52px, 14vw, 62px);
+  height: clamp(52px, 14vw, 62px);
+  background: #e8a13a;
+  color: #000;
+}
+
+.rdr-ctl-stop {
+  width:  clamp(42px, 11vw, 50px);
+  height: clamp(42px, 11vw, 50px);
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+.rdr-speed {
+  background: rgba(255,255,255,0.07);
+  color: #f0f0f0;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  padding: clamp(6px, 2vw, 8px) clamp(8px, 2.5vw, 10px);
+  font-size: clamp(12px, 3.5vw, 14px);
+  cursor: pointer;
+  min-width: clamp(60px, 16vw, 74px);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Scanned document image ── */
+.rdr-scan-image {
+  margin: 0 0 20px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid rgba(255,255,255,0.1);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.rdr-scan-img {
+  width: 100%;
+  display: block;
+}
+
+/* ── Mobile: bottom sheet on small screens ── */
+@media (max-width: 540px) {
+  .rdr-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .rdr-modal {
+    max-width: 100%;
+    max-height: 93vh;
+    border-radius: 16px 16px 0 0;
+  }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .rdr-overlay, .rdr-modal { transition: none; }
+  .rdr-word { transition: none; }
+  .rdr-ctl  { transition: none; }
+}
