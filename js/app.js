@@ -183,32 +183,41 @@ const WELCOME_TEXT  = 'Welcome! Kindly tap anywhere on your screen to scan text 
 const _welcomeAudio = new Audio();
 let _welcomeLoaded  = false;
 let _welcomeUrl     = null;
+// Fetch the welcome audio blob in the background so it's ready when the user taps.
+// We do NOT pre-set _welcomeAudio.src here — that's done after the unlock pattern below.
+const _SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 const _welcomeReady = fetch('/api/tts', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ text: WELCOME_TEXT }),
 }).then(async r => {
-  if (r.ok) {
-    const b = await r.blob();
-    _welcomeUrl = URL.createObjectURL(b);
-    _welcomeAudio.src = _welcomeUrl; // pre-load into element — tap triggers play() with zero setup
-    _welcomeLoaded = true;
-  }
+  if (r.ok) { const b = await r.blob(); _welcomeUrl = URL.createObjectURL(b); _welcomeLoaded = true; }
 }).catch(() => {});
 
 // Welcome modal
 const welcomeModal  = document.getElementById('welcome-modal');
 const welcomeTapBtn = document.getElementById('welcome-tap');
 welcomeTapBtn.addEventListener('click', async () => {
-  tts.unlock(); // unlock shared audio element while inside user gesture
+  // iOS Safari blocks audio.play() unless it was previously played in a synchronous
+  // user-gesture context. Unlock ALL three audio elements right here before any await.
+  tts.unlock();      // unlocks cloudAudio used by tts.speakAsync / say()
+  reader.unlock();   // unlocks _audio used by the reader's paragraph TTS
+  _welcomeAudio.src = _SILENT_WAV;
+  _welcomeAudio.play().catch(() => {}); // unlocks _welcomeAudio for the async play below
+
   welcomeModal.classList.add('is-closing');
   welcomeModal.addEventListener('animationend', () => welcomeModal.setAttribute('hidden', ''), { once: true });
-  if (!_welcomeLoaded) await _welcomeReady; // only waits if user tapped before fetch finished
+
+  // Wait for the blob if the fetch hasn't finished yet (edge case: user tapped very fast)
+  if (!_welcomeLoaded) await _welcomeReady;
+
   if (_welcomeLoaded) {
+    // Element is already unlocked above, so this async play() works on iOS
+    _welcomeAudio.src = _welcomeUrl;
     await new Promise(resolve => {
       _welcomeAudio.onended = resolve;
       _welcomeAudio.onerror = resolve;
-      _welcomeAudio.play().catch(resolve); // instant — audio already in element
+      _welcomeAudio.play().catch(resolve);
     });
   }
   if (_welcomeUrl) { URL.revokeObjectURL(_welcomeUrl); _welcomeUrl = null; }

@@ -18,6 +18,14 @@ let _audioUrl    = null;
 let _usingCloud  = false;
 let _rafId       = null;
 
+// Silent WAV used to unlock the audio element within a user gesture so iOS
+// allows subsequent async play() calls (after TTS fetches) for the session.
+const _SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+export function unlock() {
+  _audio.src = _SILENT;
+  _audio.play().catch(() => {});
+}
+
 // Prefetch cache: paragraph index → Promise<Blob|null>
 // We keep 2 paragraphs ahead so short headings never cause a gap.
 const _prefetchCache = new Map();
