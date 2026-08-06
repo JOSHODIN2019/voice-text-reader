@@ -181,9 +181,22 @@ async function pump() {
   const chunk   = queue.shift();
   currentChunk  = chunk;
 
-  // Always use the browser voice so every utterance in the app
-  // uses the same OS default voice as the document reader.
-  speakWithBrowserVoice(chunk);
+  if (!cloudTts.isUnavailable()) {
+    const promise = prefetchCache.get(chunk) || startSynthesis(chunk);
+    prefetchCache.delete(chunk);
+    try {
+      const audioUrl = await promise;
+      if (myEpoch !== epoch) return;
+      const preset = STYLE_PRESETS[chunk.style] || STYLE_PRESETS.informative;
+      const rate = clamp(CLOUD_BASE_RATE + preset.rate, 0.75, 1.2);
+      await playCloudAudio(audioUrl, rate, chunk, myEpoch);
+    } catch {
+      if (myEpoch === epoch) speakWithBrowserVoice(chunk);
+    }
+    prefetchNext();
+  } else {
+    speakWithBrowserVoice(chunk);
+  }
 }
 
 export function speakAsync(text, { style } = {}) {

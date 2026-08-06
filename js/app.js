@@ -273,6 +273,14 @@ async function extractImage(file) {
   URL.revokeObjectURL(url);
   captureCanvas.width=img.naturalWidth; captureCanvas.height=img.naturalHeight;
   captureCanvas.getContext('2d').drawImage(img, 0, 0);
+
+  // Try GPT-4o Vision first (handles text extraction AND image description)
+  const cloudResult = await cloudOcr(captureCanvas);
+  if (cloudResult?.text?.length >= MIN_LENGTH) {
+    return cleanOcrText(cloudResult.text);
+  }
+
+  // Fallback to Tesseract.js
   await ocr.init();
   return cleanOcrText((await ocr.recognize(captureCanvas)).text);
 }

@@ -8,10 +8,16 @@ let _paraIdx        = 0;
 let _uttBase        = 0;
 let _status         = 'stopped';
 let _rate           = 1;
-let _activeUtt      = null;
+let _activeId       = 0;
 let _onClose        = null;
 let _ready          = false;
 let _fallbackTimers = [];
+
+// Cloud TTS audio element
+const _audio = new Audio();
+let _audioUrl    = null;
+let _usingCloud  = false;
+let _rafId       = null;
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 
@@ -26,7 +32,6 @@ export function init() {
     const v = e.target.value;
     if (v !== '') { jumpTo(parseInt(v, 10)); e.target.value = ''; }
   });
-  // Click outside the modal card closes the reader
   _el('rdr-overlay').addEventListener('click', e => {
     if (e.target === _el('rdr-overlay')) close();
   });
@@ -49,7 +54,6 @@ export function open(text, filename, onClose) {
 
   const overlay = _el('rdr-overlay');
   overlay.removeAttribute('hidden');
-  // Force reflow so the transition fires
   overlay.getBoundingClientRect();
   overlay.classList.add('is-open');
 
@@ -86,7 +90,9 @@ export function setSpeed(val) {
   const r = parseFloat(val);
   if (!isFinite(r)) return;
   _rate = r;
-  if (_status === 'playing') {
+  if (_usingCloud && _status === 'playing') {
+    _audio.playbackRate = r; // audio element handles rate change live — no restart needed
+  } else if (!_usingCloud && _status === 'playing') {
     const pi = _paraIdx, wi = _wordIdx;
     _cancelSynth();
     wi >= 0 ? _speakFromWord(pi, wi) : _speakFrom(pi, 0);
@@ -168,7 +174,7 @@ function _buildJumpMenu() {
 
 // ─── Speech ───────────────────────────────────────────────────────────────────
 
-function _speakFrom(pi, offset) {
+async function _speakFrom(pi, offset) {
   if (pi >= _paras.length) { _status = 'stopped'; _clearHL(); _updateBtn(); return; }
   _paraIdx = pi;
   _status  = 'playing';
@@ -177,25 +183,73 @@ function _speakFrom(pi, offset) {
   if (!txt.trim()) { _speakFrom(pi + 1, 0); return; }
   _uttBase = para.absStart + offset;
 
+  const myId = ++_activeId;
+
+  // Try OpenAI TTS (cloud) first
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: txt }),
+    });
+
+    if (_activeId !== myId || _status !== 'playing') return;
+
+    if (res.ok) {
+      const blob = await res.blob();
+      if (_activeId !== myId || _status !== 'playing') return;
+
+      if (_audioUrl) URL.revokeObjectURL(_audioUrl);
+      _audioUrl = URL.createObjectURL(blob);
+      _usingCloud = true;
+
+      _audio.src = _audioUrl;
+      _audio.playbackRate = _rate;
+
+      _audio.onended = () => {
+        if (_activeId !== myId) return;
+        _stopRaf();
+        _usingCloud = false;
+        if (_status === 'playing') _speakFrom(pi + 1, 0);
+      };
+
+      _audio.onerror = () => {
+        if (_activeId !== myId) return;
+        _stopRaf();
+        _usingCloud = false;
+        if (_status === 'playing') _speakFrom(pi + 1, 0);
+      };
+
+      try { await _audio.play(); } catch { return; }
+      if (_activeId !== myId || _status !== 'playing') return;
+      _startRafHighlight(para, myId);
+      return;
+    }
+  } catch {}
+
+  if (_activeId !== myId || _status !== 'playing') return;
+
+  // Fallback: browser speech synthesis
+  _usingCloud = false;
+  _speakWithBrowser(pi, para, txt, myId);
+}
+
+function _speakWithBrowser(pi, para, txt, myId) {
   const utt = new SpeechSynthesisUtterance(txt);
   utt.rate  = _rate;
-  _activeUtt = utt;
 
   let boundaryFired = false;
 
   utt.addEventListener('boundary', e => {
-    if (e.name !== 'word' || _status !== 'playing' || _activeUtt !== utt) return;
+    if (e.name !== 'word' || _status !== 'playing' || _activeId !== myId) return;
     boundaryFired = true;
     const w = _resolve(_uttBase + e.charIndex);
     if (w !== undefined && w !== _wordIdx) _highlight(w);
   });
 
   utt.addEventListener('start', () => {
-    // iOS Safari never fires word boundary events — fall back to timer-based
-    // highlighting after 500 ms if no boundary event has arrived.
     const checkId = setTimeout(() => {
-      if (boundaryFired || _activeUtt !== utt || _status !== 'playing') return;
-      // Estimate ~13 chars/sec at rate=1; scale by current rate.
+      if (boundaryFired || _activeId !== myId || _status !== 'playing') return;
       const CPS = 13 * _rate;
       for (let wi = para.fw; wi <= para.lw; wi++) {
         const word = _words[wi];
@@ -203,7 +257,7 @@ function _speakFrom(pi, offset) {
         const charOff = word.absStart - _uttBase;
         if (charOff < 0) continue;
         const id = setTimeout(() => {
-          if (_activeUtt === utt && _status === 'playing') _highlight(wi);
+          if (_activeId === myId && _status === 'playing') _highlight(wi);
         }, Math.round((charOff / CPS) * 1000));
         _fallbackTimers.push(id);
       }
@@ -213,14 +267,14 @@ function _speakFrom(pi, offset) {
 
   utt.addEventListener('end', () => {
     _clearFallbackTimers();
-    if (_activeUtt !== utt || _status !== 'playing') return;
+    if (_activeId !== myId || _status !== 'playing') return;
     _speakFrom(pi + 1, 0);
   });
 
   utt.addEventListener('error', e => {
     _clearFallbackTimers();
     if (e.error === 'canceled' || e.error === 'interrupted') return;
-    if (_activeUtt === utt && _status === 'playing') _speakFrom(pi + 1, 0);
+    if (_activeId === myId && _status === 'playing') _speakFrom(pi + 1, 0);
   });
 
   synth.speak(utt);
@@ -236,12 +290,34 @@ function _speakFromWord(pi, wi) {
 function _pause() {
   if (_status !== 'playing') return;
   _status = 'paused';
-  _cancelSynth();
+  _stopRaf();
+  if (_usingCloud) {
+    _audio.pause(); // keeps src + currentTime so resume continues from same position
+  } else {
+    _clearFallbackTimers();
+    _activeId++;
+    try { synth.cancel(); } catch {}
+  }
   _updateBtn();
 }
 
 function _resume() {
   if (_status === 'playing') return;
+  if (_usingCloud && _audio.src && !_audio.ended) {
+    _status = 'playing';
+    _audio.playbackRate = _rate;
+    _audio.play().catch(() => { _usingCloud = false; _resumeFromWord(); });
+    _startRafHighlight(_paras[_paraIdx], _activeId);
+    _updateBtn();
+  } else {
+    _usingCloud = false;
+    _resumeFromWord();
+    _updateBtn();
+  }
+}
+
+function _resumeFromWord() {
+  _status = 'playing';
   if (_wordIdx >= 0) {
     for (let pi = 0; pi < _paras.length; pi++) {
       if (_wordIdx >= _paras[pi].fw && _wordIdx <= _paras[pi].lw) {
@@ -253,14 +329,49 @@ function _resume() {
   _speakFrom(_paraIdx >= 0 ? _paraIdx : 0, 0);
 }
 
+// ─── RAF word highlight (cloud audio) ────────────────────────────────────────
+
+function _startRafHighlight(para, myId) {
+  _stopRaf();
+  const CPS = 13; // estimated chars/sec in TTS audio at rate=1; currentTime already reflects playbackRate
+
+  function loop() {
+    if (_activeId !== myId || _status !== 'playing' || !_usingCloud) return;
+    const charsElapsed = _audio.currentTime * CPS;
+    let found = -1;
+    for (let wi = para.fw; wi <= para.lw; wi++) {
+      const word = _words[wi];
+      if (!word) continue;
+      const charOff = word.absStart - _uttBase;
+      if (charOff <= charsElapsed) found = wi;
+      else break;
+    }
+    if (found >= 0 && found !== _wordIdx) _highlight(found);
+    _rafId = requestAnimationFrame(loop);
+  }
+
+  _rafId = requestAnimationFrame(loop);
+}
+
+function _stopRaf() {
+  if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
+}
+
+// ─── Timers (browser synth fallback) ─────────────────────────────────────────
+
 function _clearFallbackTimers() {
   _fallbackTimers.forEach(clearTimeout);
   _fallbackTimers = [];
 }
 
 function _cancelSynth() {
+  _activeId++;
   _clearFallbackTimers();
-  _activeUtt = null;
+  _stopRaf();
+  _usingCloud = false;
+  _audio.pause();
+  _audio.removeAttribute('src');
+  if (_audioUrl) { URL.revokeObjectURL(_audioUrl); _audioUrl = null; }
   try { synth.cancel(); } catch {}
 }
 
@@ -291,7 +402,7 @@ function _scrollTo(wi) {
   }
 }
 
-// ─── Word resolution ─────────────────────────────────────────────────────────
+// ─── Word resolution ──────────────────────────────────────────────────────────
 
 function _resolve(abs) {
   let i = _charToWord.get(abs);
@@ -300,7 +411,6 @@ function _resolve(abs) {
     i = _charToWord.get(abs + d); if (i !== undefined) return i;
     i = _charToWord.get(abs - d); if (i !== undefined) return i;
   }
-  // binary search: largest word whose absStart ≤ abs
   let lo = 0, hi = _words.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;

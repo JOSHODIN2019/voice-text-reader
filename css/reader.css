@@ -199,6 +199,18 @@
   }
 }
 
+/* ── Focus indicators ── */
+.rdr-back:focus-visible,
+.rdr-ctl:focus-visible {
+  outline: 3px solid #e8a13a;
+  outline-offset: 3px;
+}
+.rdr-jump:focus-visible,
+.rdr-speed:focus-visible {
+  outline: 3px solid #e8a13a;
+  outline-offset: 2px;
+}
+
 /* ── Reduced motion ── */
 @media (prefers-reduced-motion: reduce) {
   .rdr-overlay, .rdr-modal { transition: none; }

@@ -4,7 +4,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.GOOGLE_VISION_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     res.status(503).json({ error: 'OCR service not configured.' });
     return;
@@ -16,48 +16,43 @@ export default async function handler(req, res) {
     return;
   }
 
-  const base64 = image.replace(/^data:image\/\w+;base64,/, '');
-
   try {
-    const upstream = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: base64 },
-              features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
-            },
-          ],
-        }),
-      }
-    );
+    const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Look at this image carefully. If it contains printed or handwritten text, extract ALL of it exactly as written, preserving all punctuation, numbers, and formatting. If it is a photograph, diagram, or image with little or no text, describe in detail what you see — including people, objects, colours, setting, and any notable details. Respond with only the extracted text or description, no preamble or labels.',
+              },
+              {
+                type: 'image_url',
+                image_url: { url: image, detail: 'high' },
+              },
+            ],
+          },
+        ],
+        max_tokens: 2000,
+      }),
+    });
 
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => '');
-      res.status(502).json({ error: 'Google Vision request failed.', detail: detail.slice(0, 500) });
+      res.status(502).json({ error: 'GPT-4o Vision request failed.', detail: detail.slice(0, 500) });
       return;
     }
 
     const json = await upstream.json();
-    const response = json.responses?.[0];
-
-    if (response?.error) {
-      res.status(502).json({ error: response.error.message });
-      return;
-    }
-
-    const text = response?.fullTextAnnotation?.text?.trim() || '';
-
-    // average block confidences for a single confidence score
-    const blocks = response?.fullTextAnnotation?.pages?.flatMap(p => p.blocks) || [];
-    const confidence = blocks.length
-      ? Math.round((blocks.reduce((sum, b) => sum + (b.confidence ?? 1), 0) / blocks.length) * 100)
-      : (text ? 90 : 0);
-
-    res.status(200).json({ text, confidence });
+    const text = json.choices?.[0]?.message?.content?.trim() || '';
+    res.status(200).json({ text, confidence: 95 });
   } catch (err) {
     res.status(502).json({ error: 'OCR request failed.', detail: String(err).slice(0, 500) });
   }
