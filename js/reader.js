@@ -1,5 +1,3 @@
-const synth = window.speechSynthesis;
-
 let _words          = [];
 let _paras          = [];
 let _charToWord     = new Map();
@@ -12,12 +10,30 @@ let _activeId       = 0;
 let _onClose        = null;
 let _ready          = false;
 let _fallbackTimers = [];
+let _imageUrl       = null;
 
 // Cloud TTS audio element
 const _audio = new Audio();
 let _audioUrl    = null;
 let _usingCloud  = false;
 let _rafId       = null;
+
+// Prefetch cache: paragraph index → Promise<Blob|null>
+// We keep 2 paragraphs ahead so short headings never cause a gap.
+const _prefetchCache = new Map();
+
+function _prefetchParagraph(pi) {
+  if (pi >= _paras.length || _prefetchCache.has(pi)) return;
+  const txt = _paras[pi].text.trim();
+  if (!txt) return;
+  _prefetchCache.set(pi,
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: txt }),
+    }).then(r => r.ok ? r.blob() : null).catch(() => null)
+  );
+}
 
 // ─── Public ───────────────────────────────────────────────────────────────────
 
@@ -37,17 +53,25 @@ export function init() {
   });
 }
 
-export function open(text, filename, onClose) {
-  _onClose = onClose ?? null;
-  _status  = 'stopped';
-  _wordIdx = -1;
-  _paraIdx = 0;
-  _uttBase = 0;
-  _rate    = 1;
+export function open(text, filename, onClose, imageUrl = null) {
+  _onClose  = onClose ?? null;
+  _imageUrl = imageUrl;
+  _status   = 'stopped';
+  _wordIdx  = -1;
+  _paraIdx  = 0;
+  _uttBase  = 0;
+  _rate     = 1;
+  _prefetchCache.clear();
 
   _parseText(text);
   _renderText();
   _buildJumpMenu();
+
+  // Warm up the pipeline — prefetch paragraphs 1 and 2 while paragraph 0 loads.
+  // Keeping it at 2 (not 4) avoids saturating a mobile cellular connection.
+  for (let i = 1; i <= Math.min(2, _paras.length - 1); i++) {
+    _prefetchParagraph(i);
+  }
 
   _el('rdr-title').textContent = (filename || 'Document').replace(/\.[^/.]+$/, '');
   _el('rdr-speed').value = '1';
@@ -57,8 +81,8 @@ export function open(text, filename, onClose) {
   overlay.getBoundingClientRect();
   overlay.classList.add('is-open');
 
-  _updateBtn();
-  _speakFrom(0, 0);
+  _speakFrom(0, 0); // sets _status = 'playing' synchronously before first await
+  _updateBtn();     // must come after so it sees 'playing' and shows the pause button
 }
 
 export function close() {
@@ -140,6 +164,15 @@ function _parseText(text) {
 function _renderText() {
   const box = _el('rdr-text');
   box.innerHTML = '';
+
+  if (_imageUrl) {
+    const img = document.createElement('img');
+    img.src = _imageUrl;
+    img.className = 'rdr-captured-img';
+    img.alt = 'Captured image';
+    box.appendChild(img);
+  }
+
   let wi = 0;
   for (const para of _paras) {
     const p = document.createElement('p');
@@ -185,20 +218,28 @@ async function _speakFrom(pi, offset) {
 
   const myId = ++_activeId;
 
-  // Try OpenAI TTS (cloud) first
-  try {
-    const res = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: txt }),
-    });
+  // Kick off the next two paragraphs immediately before awaiting the current one.
+  // 2-ahead keeps the pipeline full without hammering the API on mobile connections.
+  _prefetchParagraph(pi + 1);
+  _prefetchParagraph(pi + 2);
 
+  // Try OpenAI TTS (cloud) first — use prefetched blob if available
+  try {
+    let blobPromise = _prefetchCache.get(pi);
+    if (blobPromise) {
+      _prefetchCache.delete(pi);
+    } else {
+      blobPromise = fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: txt }),
+      }).then(r => r.ok ? r.blob() : null).catch(() => null);
+    }
+
+    const blob = await blobPromise;
     if (_activeId !== myId || _status !== 'playing') return;
 
-    if (res.ok) {
-      const blob = await res.blob();
-      if (_activeId !== myId || _status !== 'playing') return;
-
+    if (blob) {
       if (_audioUrl) URL.revokeObjectURL(_audioUrl);
       _audioUrl = URL.createObjectURL(blob);
       _usingCloud = true;
@@ -227,57 +268,9 @@ async function _speakFrom(pi, offset) {
     }
   } catch {}
 
+  // Cloud TTS failed and browser voice is never used — skip to next paragraph silently
   if (_activeId !== myId || _status !== 'playing') return;
-
-  // Fallback: browser speech synthesis
-  _usingCloud = false;
-  _speakWithBrowser(pi, para, txt, myId);
-}
-
-function _speakWithBrowser(pi, para, txt, myId) {
-  const utt = new SpeechSynthesisUtterance(txt);
-  utt.rate  = _rate;
-
-  let boundaryFired = false;
-
-  utt.addEventListener('boundary', e => {
-    if (e.name !== 'word' || _status !== 'playing' || _activeId !== myId) return;
-    boundaryFired = true;
-    const w = _resolve(_uttBase + e.charIndex);
-    if (w !== undefined && w !== _wordIdx) _highlight(w);
-  });
-
-  utt.addEventListener('start', () => {
-    const checkId = setTimeout(() => {
-      if (boundaryFired || _activeId !== myId || _status !== 'playing') return;
-      const CPS = 13 * _rate;
-      for (let wi = para.fw; wi <= para.lw; wi++) {
-        const word = _words[wi];
-        if (!word) continue;
-        const charOff = word.absStart - _uttBase;
-        if (charOff < 0) continue;
-        const id = setTimeout(() => {
-          if (_activeId === myId && _status === 'playing') _highlight(wi);
-        }, Math.round((charOff / CPS) * 1000));
-        _fallbackTimers.push(id);
-      }
-    }, 500);
-    _fallbackTimers.push(checkId);
-  });
-
-  utt.addEventListener('end', () => {
-    _clearFallbackTimers();
-    if (_activeId !== myId || _status !== 'playing') return;
-    _speakFrom(pi + 1, 0);
-  });
-
-  utt.addEventListener('error', e => {
-    _clearFallbackTimers();
-    if (e.error === 'canceled' || e.error === 'interrupted') return;
-    if (_activeId === myId && _status === 'playing') _speakFrom(pi + 1, 0);
-  });
-
-  synth.speak(utt);
+  _speakFrom(pi + 1, 0);
 }
 
 function _speakFromWord(pi, wi) {
@@ -291,13 +284,7 @@ function _pause() {
   if (_status !== 'playing') return;
   _status = 'paused';
   _stopRaf();
-  if (_usingCloud) {
-    _audio.pause(); // keeps src + currentTime so resume continues from same position
-  } else {
-    _clearFallbackTimers();
-    _activeId++;
-    try { synth.cancel(); } catch {}
-  }
+  _audio.pause(); // keeps src + currentTime so resume continues from same position
   _updateBtn();
 }
 
@@ -333,7 +320,7 @@ function _resumeFromWord() {
 
 function _startRafHighlight(para, myId) {
   _stopRaf();
-  const CPS = 13; // estimated chars/sec in TTS audio at rate=1; currentTime already reflects playbackRate
+  const CPS = 17; // OpenAI TTS speaks ~17 chars/sec at rate=1; currentTime already reflects playbackRate
 
   function loop() {
     if (_activeId !== myId || _status !== 'playing' || !_usingCloud) return;
@@ -357,8 +344,6 @@ function _stopRaf() {
   if (_rafId !== null) { cancelAnimationFrame(_rafId); _rafId = null; }
 }
 
-// ─── Timers (browser synth fallback) ─────────────────────────────────────────
-
 function _clearFallbackTimers() {
   _fallbackTimers.forEach(clearTimeout);
   _fallbackTimers = [];
@@ -369,10 +354,10 @@ function _cancelSynth() {
   _clearFallbackTimers();
   _stopRaf();
   _usingCloud = false;
+  _prefetchCache.clear();
   _audio.pause();
   _audio.removeAttribute('src');
   if (_audioUrl) { URL.revokeObjectURL(_audioUrl); _audioUrl = null; }
-  try { synth.cancel(); } catch {}
 }
 
 // ─── Highlight ────────────────────────────────────────────────────────────────

@@ -31,7 +31,7 @@ export default async function handler(req, res) {
             content: [
               {
                 type: 'text',
-                text: 'Look at this image carefully. If it contains printed or handwritten text, extract ALL of it exactly as written, preserving all punctuation, numbers, and formatting. If it is a photograph, diagram, or image with little or no text, describe in detail what you see — including people, objects, colours, setting, and any notable details. Respond with only the extracted text or description, no preamble or labels.',
+                text: 'Look at this image carefully.\n\nIf it contains printed or handwritten text, respond with:\nTEXT: followed by all the text exactly as written, preserving all punctuation, numbers, and formatting.\n\nIf it is a photograph, drawing, diagram, or scene with little or no text, respond with:\nIMAGE: followed by a detailed description of what you see, including people, objects, colours, setting, and any notable details.\n\nRespond with only the prefix and content — no extra explanation.',
               },
               {
                 type: 'image_url',
@@ -51,8 +51,12 @@ export default async function handler(req, res) {
     }
 
     const json = await upstream.json();
-    const text = json.choices?.[0]?.message?.content?.trim() || '';
-    res.status(200).json({ text, confidence: 95 });
+    const raw  = json.choices?.[0]?.message?.content?.trim() || '';
+    let type = 'text';
+    let text = raw;
+    if (raw.startsWith('IMAGE:')) { type = 'image'; text = raw.slice(6).trim(); }
+    else if (raw.startsWith('TEXT:')) { type = 'text';  text = raw.slice(5).trim(); }
+    res.status(200).json({ text, confidence: 95, type });
   } catch (err) {
     res.status(502).json({ error: 'OCR request failed.', detail: String(err).slice(0, 500) });
   }

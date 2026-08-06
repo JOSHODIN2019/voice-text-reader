@@ -460,3 +460,190 @@ body[data-screen="idle"] .btn-upload {
     --pill-height: 48px;
   }
 }
+
+/* ── Welcome modal ── */
+.welcome-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: wm-fadein 0.5s ease forwards;
+}
+
+.welcome-modal[hidden] { display: none !important; }
+
+.welcome-modal.is-closing {
+  animation: wm-fadeout 0.35s ease forwards;
+}
+
+@keyframes wm-fadein  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes wm-fadeout { from { opacity: 1; } to { opacity: 0; } }
+
+.welcome-card {
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 24px;
+  padding: clamp(28px, 6vw, 44px) clamp(24px, 6vw, 40px);
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+  animation: wm-slidein 0.5s cubic-bezier(0.34,1.26,0.64,1) forwards;
+}
+
+@keyframes wm-slidein {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.welcome-logo {
+  font-family: 'Lobster', cursive;
+  font-size: clamp(28px, 7vw, 36px);
+  color: #e8a13a;
+  margin-bottom: 10px;
+}
+
+.welcome-tagline {
+  font-family: var(--font-stack);
+  font-size: clamp(13px, 3.5vw, 15px);
+  color: rgba(255,255,255,0.6);
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.welcome-hint {
+  font-family: var(--font-stack);
+  font-size: clamp(11px, 3vw, 13px);
+  color: rgba(255,255,255,0.35);
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.welcome-tap-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #e8a13a;
+  color: #000;
+  border: none;
+  border-radius: 50px;
+  padding: 14px 28px;
+  font-family: var(--font-stack);
+  font-size: clamp(14px, 3.5vw, 16px);
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+  transition: transform 0.1s, opacity 0.1s;
+}
+
+.welcome-tap-btn:active {
+  transform: scale(0.96);
+  opacity: 0.85;
+}
+
+/* ── Scan countdown overlay ───────────────────────────────────────────────── */
+
+.scan-countdown {
+  position: fixed;
+  bottom: clamp(100px, 18vw, 130px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  animation: cd-fadein 0.35s ease forwards;
+}
+
+.scan-countdown:active .countdown-circle {
+  transform: scale(0.93);
+}
+
+@keyframes cd-fadein {
+  from { opacity: 0; transform: translateX(-50%) scale(0.8); }
+  to   { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+.scan-countdown[hidden] { display: none !important; }
+
+.countdown-circle {
+  position: relative;
+  width: clamp(100px, 26vw, 130px);
+  height: clamp(100px, 26vw, 130px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.1s ease;
+}
+
+.countdown-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.countdown-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.15);
+  stroke-width: 6;
+}
+
+.countdown-ring {
+  fill: none;
+  stroke: #e8a13a;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-dasharray: 276.46;
+  stroke-dashoffset: 0;
+}
+
+.countdown-ring.is-running {
+  animation: cd-ring 5s linear forwards;
+}
+
+@keyframes cd-ring {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: 276.46; }
+}
+
+.countdown-number {
+  font-size: clamp(40px, 11vw, 56px);
+  font-weight: 800;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7);
+  transition: transform 0.15s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.countdown-number.bump {
+  transform: scale(1.25);
+}
+
+.countdown-label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: clamp(11px, 3vw, 13px);
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-countdown { animation: none; }
+  .countdown-ring.is-running { animation: none; }
+  .countdown-number { transition: none; }
+}
+

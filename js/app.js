@@ -126,10 +126,47 @@ function sleep(ms, signal) {
 }
 async function say(text, style)  { announce(text);                       await tts.speakAsync(text, { style }); }
 async function sayError(text)    { announce(text, { assertive: true });  await tts.speakAsync(text, { style: 'serious' }); }
+// ── Scan countdown ────────────────────────────────────────────────────────────
+const _cdEl     = document.getElementById('scan-countdown');
+const _cdNumEl  = document.getElementById('countdown-number');
+const _cdRingEl = _cdEl?.querySelector('.countdown-ring');
+let _cdInterval = null;
+let _cdN        = 5;
+
+function startCountdown() {
+  stopCountdown(); // clear any previous
+  _cdN = 5;
+  _cdNumEl.textContent = _cdN;
+  _cdRingEl.classList.remove('is-running');
+  void _cdRingEl.offsetWidth; // force reflow to restart animation
+  _cdRingEl.classList.add('is-running');
+  _cdEl.removeAttribute('hidden');
+
+  _cdInterval = setInterval(() => {
+    _cdN--;
+    _cdNumEl.textContent = Math.max(0, _cdN);
+
+    // Bump animation on number change
+    _cdNumEl.classList.remove('bump');
+    void _cdNumEl.offsetWidth;
+    _cdNumEl.classList.add('bump');
+    setTimeout(() => _cdNumEl.classList.remove('bump'), 200);
+
+    if (_cdN <= 0) {
+      stopCountdown();
+      scanner.capture(); // auto-capture when countdown ends
+    }
+  }, 1000);
+}
+
+function stopCountdown() {
+  if (_cdInterval) { clearInterval(_cdInterval); _cdInterval = null; }
+  if (_cdEl) _cdEl.setAttribute('hidden', '');
+}
+
 function cleanupScanResources() {
+  stopCountdown();
   scanner.stop();
-  btnCapture.classList.remove('is-visible', 'has-doc');
-  captureWrap.hidden = true;
   scanPulse.stop();
   camera.stop(videoEl);
   mic.stop();
@@ -141,45 +178,81 @@ function triggerFlash() {
   captureFlash.classList.add('is-flashing');
 }
 
+// Fetch welcome audio on page load and pre-load into the element so tap → play is instant
+const WELCOME_TEXT  = 'Welcome! Kindly tap anywhere on your screen to scan text or an image, or tap the Upload button below to upload a document or image. I\'ll read the text aloud for you or help interpret what\'s in the image.';
+const _welcomeAudio = new Audio();
+let _welcomeLoaded  = false;
+let _welcomeUrl     = null;
+const _welcomeReady = fetch('/api/tts', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: WELCOME_TEXT }),
+}).then(async r => {
+  if (r.ok) {
+    const b = await r.blob();
+    _welcomeUrl = URL.createObjectURL(b);
+    _welcomeAudio.src = _welcomeUrl; // pre-load into element — tap triggers play() with zero setup
+    _welcomeLoaded = true;
+  }
+}).catch(() => {});
+
+// Welcome modal
+const welcomeModal  = document.getElementById('welcome-modal');
+const welcomeTapBtn = document.getElementById('welcome-tap');
+welcomeTapBtn.addEventListener('click', async () => {
+  tts.unlock(); // unlock shared audio element while inside user gesture
+  welcomeModal.classList.add('is-closing');
+  welcomeModal.addEventListener('animationend', () => welcomeModal.setAttribute('hidden', ''), { once: true });
+  if (!_welcomeLoaded) await _welcomeReady; // only waits if user tapped before fetch finished
+  if (_welcomeLoaded) {
+    await new Promise(resolve => {
+      _welcomeAudio.onended = resolve;
+      _welcomeAudio.onerror = resolve;
+      _welcomeAudio.play().catch(resolve); // instant — audio already in element
+    });
+  }
+  if (_welcomeUrl) { URL.revokeObjectURL(_welcomeUrl); _welcomeUrl = null; }
+});
+
+let _greeted = false;
 async function handleIdleActivate() {
   if (machine.current !== 'idle') return;
   document.body.classList.add('has-tapped');
   machine.transition('requesting-camera');
+  _greeted = true;
+
   let stream;
   try { stream = await camera.start(videoEl); }
   catch {
-    await sayError('Camera permission is required for scanning text. Please enable camera access and try again.');
+    await sayError('Camera permission is required. Please enable camera access and try again.');
     if (machine.current !== 'idle') machine.transition('idle');
     return;
   }
   if (machine.current !== 'requesting-camera') return;
-  await say('Camera opened. Point the camera at a document.', 'instruction');
-  if (machine.current !== 'requesting-camera') return;
   machine.transition('scanning');
+  announce('Scanning.');
   mic.start(stream);
-  await ocr.init(); // preload OCR worker while user aims camera
+  ocr.init(); // preload in background
 
   abortController = new AbortController();
 
-  // Show capture button immediately — user can always tap to capture,
-  // regardless of whether automatic document detection has fired
-  captureWrap.hidden = false;
-  requestAnimationFrame(() => btnCapture.classList.add('is-visible'));
+  // Say "Scanning." first, then start the countdown so the numbers begin after the voice finishes
+  await tts.speakAsync('Scanning.', { style: 'instruction' });
+  if (machine.current !== 'scanning') return;
+  startCountdown();
 
   scanner.start({
     timeoutMs: SCAN_TIMEOUT_MS,
-    onDocumentChange(hasDoc) {
-      // Pulse the button when corners are locked on a document
-      btnCapture.classList.toggle('has-doc', hasDoc);
-    },
+    onDocumentChange(_hasDoc) {},
     async onCapture(processedCanvas) {
       if (machine.current !== 'scanning') return;
+      stopCountdown();
       triggerFlash();
 
-      // 1. Google Vision (best accuracy — full punctuation, no missed words)
+      // 1. GPT-4o Vision (primary — handles both text and images)
       let result = await cloudOcr(processedCanvas);
 
-      // 2. Tesseract.js on warp-corrected frame (free in-browser fallback)
+      // 2. Tesseract.js on warp-corrected frame (fallback, text only)
       if (!result || result.text.length < MIN_LENGTH) {
         try { result = await ocr.recognize(processedCanvas); }
         catch { result = { text: '', confidence: 0 }; }
@@ -195,9 +268,13 @@ async function handleIdleActivate() {
       }
 
       if (machine.current !== 'scanning') return;
-      const cleaned = cleanOcrText(result.text);
+
+      const isImage  = result.type === 'image';
+      const cleaned  = isImage ? result.text : cleanOcrText(result.text);
+      const imageUrl = isImage ? processedCanvas.toDataURL('image/jpeg', 0.9) : null;
+
       if (cleaned.length >= MIN_LENGTH) {
-        onScanSuccess(cleaned);
+        onScanSuccess(cleaned, isImage, imageUrl);
       } else {
         onScanTimeout();
       }
@@ -207,14 +284,15 @@ async function handleIdleActivate() {
     },
   });
 
-  // Capture button is always tappable during scanning
-  btnCapture.onclick = () => scanner.capture();
+  // Countdown circle is tappable for early manual capture
+  _cdEl.onclick = () => { stopCountdown(); scanner.capture(); };
 }
 
-function onScanSuccess(text) {
+function onScanSuccess(text, isImage = false, imageUrl = null) {
   cleanupScanResources();
   machine.transition('idle');
-  reader.open(text, 'Scanned Document', () => { idleBtn.focus(); });
+  const title = isImage ? 'Image Description' : 'Scanned Document';
+  reader.open(text, title, () => { idleBtn.focus(); }, imageUrl);
 }
 
 async function onScanTimeout() {
@@ -229,19 +307,18 @@ async function handleUpload(e) {
   if (!file || machine.current !== 'idle') return;
 
   machine.transition('scanning');
-  await say('Loading document.', 'instruction');
-  if (machine.current !== 'scanning') return;
 
-  let text = '';
+  // Say "Loading" and process the file in parallel to avoid sequential delay
+  let result = { text: '', type: 'text', imageUrl: null };
   try {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (ext === 'docx' || file.type.includes('wordprocessingml')) {
-      text = await extractDocx(file);
-    } else if (ext === 'pdf' || file.type === 'application/pdf') {
-      text = await extractPdf(file);
-    } else {
-      text = await extractImage(file);
-    }
+    const [, extracted] = await Promise.all([
+      say('Loading document.', 'instruction'),
+      ext === 'docx' || file.type.includes('wordprocessingml') ? extractDocx(file).then(t => ({ text: t }))
+      : ext === 'pdf' || file.type === 'application/pdf'       ? extractPdf(file).then(t => ({ text: t }))
+      : extractImage(file),
+    ]);
+    result = extracted;
   } catch {
     cleanupScanResources(); machine.transition('error');
     await sayError('Could not read that file. Please try a different document.');
@@ -249,7 +326,7 @@ async function handleUpload(e) {
     return;
   }
 
-  if (!text || text.length < MIN_LENGTH) {
+  if (!result.text || result.text.length < MIN_LENGTH) {
     cleanupScanResources(); machine.transition('error');
     await sayError('No readable text found in the document.');
     if (machine.current === 'error') machine.transition('idle');
@@ -258,12 +335,9 @@ async function handleUpload(e) {
 
   if (machine.current !== 'scanning') return;
 
-  // Return app to idle, then open the reader overlay on top
   machine.transition('idle');
-  reader.open(text, file.name, () => {
-    // reader closed — app is already idle, just re-focus the idle button
-    idleBtn.focus();
-  });
+  const title = result.type === 'image' ? 'Image Description' : file.name;
+  reader.open(result.text, title, () => { idleBtn.focus(); }, result.imageUrl);
 }
 
 async function extractImage(file) {
@@ -274,18 +348,43 @@ async function extractImage(file) {
   captureCanvas.width=img.naturalWidth; captureCanvas.height=img.naturalHeight;
   captureCanvas.getContext('2d').drawImage(img, 0, 0);
 
+  const imageUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
+
   // Try GPT-4o Vision first (handles text extraction AND image description)
   const cloudResult = await cloudOcr(captureCanvas);
   if (cloudResult?.text?.length >= MIN_LENGTH) {
-    return cleanOcrText(cloudResult.text);
+    const isImage = cloudResult.type === 'image';
+    const text    = isImage ? cloudResult.text : cleanOcrText(cloudResult.text);
+    return { text, type: cloudResult.type || 'text', imageUrl };
   }
 
   // Fallback to Tesseract.js
   await ocr.init();
-  return cleanOcrText((await ocr.recognize(captureCanvas)).text);
+  return { text: cleanOcrText((await ocr.recognize(captureCanvas)).text), type: 'text', imageUrl };
+}
+
+async function _loadPdfJs() {
+  if (window['pdfjs-dist/build/pdf']) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+    s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function _loadMammoth() {
+  if (window.mammoth) return;
+  await new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mammoth@1/mammoth.browser.min.js';
+    s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
 }
 
 async function extractPdf(file) {
+  await _loadPdfJs();
   const pdfjsLib = window['pdfjs-dist/build/pdf'];
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -323,6 +422,7 @@ async function extractPdf(file) {
 }
 
 async function extractDocx(file) {
+  await _loadMammoth();
   const result = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
   return result.value?.trim() || '';
 }
@@ -348,8 +448,3 @@ window.addEventListener('pagehide', () => {
   abortController?.abort(); scanner.stop(); camera.stop(videoEl); scanPulse.stop(); mic.stop(); ocr.terminate();
 });
 
-(async function welcomeOnLoad() {
-  try {
-    await say('Good day. Kindly tap anywhere on the screen to begin. Then point your device toward the text you would like me to read.', 'greeting');
-  } catch { /* iOS Safari blocks speech before user gesture */ }
-})();

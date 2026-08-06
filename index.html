@@ -14,6 +14,24 @@
 </head>
 <body data-screen="idle">
 
+  <!-- Welcome modal — shown on load, dismissed on first tap -->
+  <div id="welcome-modal" class="welcome-modal" role="dialog" aria-modal="true" aria-label="Welcome">
+    <div class="welcome-card">
+      <div class="welcome-logo">Chinenye</div>
+      <p class="welcome-tagline">Your voice-powered document reader</p>
+      <p class="welcome-hint">Tap below to begin</p>
+      <button id="welcome-tap" class="welcome-tap-btn" aria-label="Tap to begin">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        Tap here to begin
+      </button>
+    </div>
+  </div>
+
   <canvas id="edge-glow-canvas" class="edge-glow-canvas" aria-hidden="true"></canvas>
   <div class="brand-logo">Chinenye</div>
   <video id="camera-video" playsinline muted tabindex="-1" class="camera-video"></video>
@@ -73,6 +91,18 @@
     </button>
   </div>
 
+  <!-- Countdown overlay — shown during scanning, counts 5→0 then auto-captures -->
+  <div id="scan-countdown" class="scan-countdown" aria-hidden="true" hidden>
+    <div class="countdown-circle">
+      <svg class="countdown-svg" viewBox="0 0 100 100" aria-hidden="true">
+        <circle class="countdown-track" cx="50" cy="50" r="44"/>
+        <circle class="countdown-ring" cx="50" cy="50" r="44"/>
+      </svg>
+      <span class="countdown-number" id="countdown-number">5</span>
+    </div>
+    <span class="countdown-label">Capturing in…</span>
+  </div>
+
   <canvas id="capture-canvas" tabindex="-1" class="capture-canvas"></canvas>
   <div id="status-polite"    aria-live="polite"    class="visually-hidden"></div>
   <div id="status-assertive" aria-live="assertive" class="visually-hidden"></div>
@@ -120,9 +150,6 @@
    </div><!-- /.rdr-modal -->
   </div><!-- /#rdr-overlay -->
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mammoth@1/mammoth.browser.min.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

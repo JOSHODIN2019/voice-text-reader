@@ -1,7 +1,5 @@
 import * as cloudTts from './ttsCloud.js';
 
-const synth = window.speechSynthesis;
-
 let queue = [];
 let speaking = false;
 let pendingResolve = null;
@@ -16,6 +14,14 @@ let usingCloudAudio = false;
 const listeners = new Set();
 function emit(type) { listeners.forEach(fn => fn(type)); }
 export function onEvent(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+
+// Call this inside a user-gesture handler to unlock the shared audio element
+// so that subsequent async play() calls (after fetch) work for the whole session.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+export function unlock() {
+  cloudAudio.src = SILENT_WAV;
+  cloudAudio.play().catch(() => {});
+}
 
 const PAUSE_MS = {
   sentence:    420,
@@ -136,31 +142,15 @@ function playCloudAudio(audioUrl, rate, chunk, myEpoch) {
     };
     cloudAudio.onerror = () => {
       usingCloudAudio = false;
-      if (myEpoch === epoch) speakWithBrowserVoice(chunk);
+      if (myEpoch === epoch) finishChunk(chunk); // skip silently — never fall back to browser voice
       resolveDone();
     };
     cloudAudio.play().catch(() => {
       usingCloudAudio = false;
-      if (myEpoch === epoch) speakWithBrowserVoice(chunk);
+      if (myEpoch === epoch) finishChunk(chunk);
       resolveDone();
     });
   });
-}
-
-// Uses the browser's OS default voice — same voice the document reader uses,
-// so welcome/instructions/errors all sound consistent with document reading.
-function speakWithBrowserVoice(chunk) {
-  const preset = STYLE_PRESETS[chunk.style] || STYLE_PRESETS.informative;
-  const jitter = (Math.random() - 0.5) * 0.03;
-
-  const utter = new SpeechSynthesisUtterance(chunk.text);
-  utter.rate  = clamp(BASE_RATE + preset.rate + jitter, 0.75, 1.08);
-  utter.pitch = clamp(BASE_PITCH + preset.pitch, 0.85, 1.2);
-  // No voice override — browser default matches the document reader's voice
-  utter.onboundary = () => emit('boundary');
-  utter.onend      = () => finishChunk(chunk);
-  utter.onerror    = () => pump();
-  synth.speak(utter);
 }
 
 async function pump() {
@@ -181,22 +171,18 @@ async function pump() {
   const chunk   = queue.shift();
   currentChunk  = chunk;
 
-  if (!cloudTts.isUnavailable()) {
-    const promise = prefetchCache.get(chunk) || startSynthesis(chunk);
-    prefetchCache.delete(chunk);
-    try {
-      const audioUrl = await promise;
-      if (myEpoch !== epoch) return;
-      const preset = STYLE_PRESETS[chunk.style] || STYLE_PRESETS.informative;
-      const rate = clamp(CLOUD_BASE_RATE + preset.rate, 0.75, 1.2);
-      await playCloudAudio(audioUrl, rate, chunk, myEpoch);
-    } catch {
-      if (myEpoch === epoch) speakWithBrowserVoice(chunk);
-    }
-    prefetchNext();
-  } else {
-    speakWithBrowserVoice(chunk);
+  const promise = prefetchCache.get(chunk) || startSynthesis(chunk);
+  prefetchCache.delete(chunk);
+  try {
+    const audioUrl = await promise;
+    if (myEpoch !== epoch) return;
+    const preset = STYLE_PRESETS[chunk.style] || STYLE_PRESETS.informative;
+    const rate = clamp(CLOUD_BASE_RATE + preset.rate, 0.75, 1.2);
+    await playCloudAudio(audioUrl, rate, chunk, myEpoch);
+  } catch {
+    if (myEpoch === epoch) finishChunk(chunk); // skip chunk silently on any cloud failure
   }
+  prefetchNext();
 }
 
 export function speakAsync(text, { style } = {}) {
@@ -221,7 +207,6 @@ export function cancelAll() {
     clearTimeout(pauseTimeoutId);
     pauseTimeoutId = null;
   }
-  synth.cancel();
   if (usingCloudAudio) {
     cloudAudio.pause();
     cloudAudio.removeAttribute('src');

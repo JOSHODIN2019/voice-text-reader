@@ -12,13 +12,16 @@
 // ─── Tuning ───────────────────────────────────────────────────────────────────
 const PROC_W  = 160;
 const PROC_H  = 120;
-const STABLE_FRAMES = 12;    // frames at ~15 fps before auto-capture (~0.8 s)
+const STABLE_FRAMES = 8;     // frames before auto-capture (less = faster response)
 const STABLE_TOL    = 0.07;  // max corner drift (fraction of frame) — loose for handheld
 const MIN_AREA_FRAC = 0.03;  // ignore detections covering < 3% of frame
 const MIN_EDGES     = 30;    // min edge pixels required — very permissive
 const EDGE_THRESH   = 0.12;  // Sobel magnitude threshold (fraction of max) — low
-const MAX_WARP_DIM  = 1800;  // max output side length — higher = better OCR on HD cameras
-const MIN_OCR_DIM   = 1200;  // upscale output to at least this if smaller
+const MAX_WARP_DIM  = 1200;  // reduced from 1800 — still sharp enough for GPT-4o Vision, far less CPU
+const MIN_OCR_DIM   = 900;   // reduced proportionally
+// Run detection slower on mobile to spare the CPU (10fps vs 15fps on desktop)
+const IS_MOBILE = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+const DETECT_MS = IS_MOBILE ? 100 : 66;
 
 export class DocScanner {
   #video; #overlay; #ovCtx;
@@ -87,7 +90,7 @@ export class DocScanner {
     this.#detectTid = setTimeout(() => {
       this.#runDetect();
       if (this.#detectTid !== null) this.#scheduleDetect();
-    }, 66);
+    }, DETECT_MS);
   }
 
   #runDetect() {
